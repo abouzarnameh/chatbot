@@ -155,6 +155,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text(answer)
 
 
+def should_reply_in_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    message = update.message
+    if not message or not message.text:
+        return False
+
+    text = message.text.strip().lower()
+    bot_username = (context.bot.username or "").lower()
+    call_name = BOT_CALL_NAME.lower()
+
+    # 1) Call name
+    if text.startswith(call_name):
+        return True
+
+    # 2) Mention
+    if bot_username and f"@{bot_username}" in text:
+        return True
+
+    # 3) Reply to bot message
+    if message.reply_to_message:
+        if message.reply_to_message.from_user:
+            if message.reply_to_message.from_user.id == context.bot.id:
+                return True
+
+    return False
+
 def main() -> None:
     # برای Python 3.14: لوپ رو دستی بساز
     asyncio.set_event_loop(asyncio.new_event_loop())
@@ -172,3 +197,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
