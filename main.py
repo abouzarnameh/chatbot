@@ -18,6 +18,9 @@ AVALAI_API_KEY = os.getenv("AVALAI_API_KEY", "").strip()
 AVALAI_MODEL = os.getenv("AVALAI_MODEL", "gpt-4o-mini").strip()
 BOT_CALL_NAME = os.getenv("BOT_CALL_NAME", "سس خرسی").strip()
 
+# NEW: Image model (default gpt-image-1.5)
+AVALAI_IMAGE_MODEL = os.getenv("AVALAI_IMAGE_MODEL", "gpt-image-1.5").strip()
+
 SYSTEM_PROMPT_FILE = os.getenv("SYSTEM_PROMPT_FILE", "").strip()
 SYSTEM_PROMPT_ENV = os.getenv("SYSTEM_PROMPT", "").strip()
 
@@ -83,6 +86,27 @@ async def avalai_chat(messages: list[dict], timeout_s: float = 60.0) -> str:
         data = r.json()
 
     return (data.get("choices", [{}])[0].get("message", {}) or {}).get("content", "").strip()
+
+
+# -------------------- NEW: AvalAI Image Generation --------------------
+async def avalai_generate_image(prompt: str, size: str = "1024x1024", timeout_s: float = 120.0) -> str:
+    headers = {
+        "Authorization": f"Bearer {AVALAI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": AVALAI_IMAGE_MODEL,  # gpt-image-1.5
+        "prompt": prompt,
+        "size": size,
+    }
+
+    async with httpx.AsyncClient(timeout=timeout_s) as client:
+        r = await client.post(f"{AVALAI_BASE_URL}/images/generations", headers=headers, json=payload)
+        r.raise_for_status()
+        data = r.json()
+
+    # expected: {"data":[{"url":"..."}]}
+    return data["data"][0]["url"]
 
 
 # -------------------- Text normalization (fix invisible chars / spacing) --------------------
@@ -155,7 +179,8 @@ def clean_user_text(text: str, bot_username: str) -> str:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         f"سلام! من {BOT_CALL_NAME} هستم.\n"
-        "تو گروه: یا اسممو اول پیام بیار، یا منشن کن، یا روی پیام من ریپلای بزن."
+        "تو گروه: یا اسممو اول پیام بیار، یا منشن کن، یا روی پیام من ریپلای بزن.\n"
+        "برای عکس هم: /image توضیح عکس"
     )
 
 
@@ -163,6 +188,22 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     uid = update.effective_user.id
     history[uid].clear()
     await update.message.reply_text("حافظه گفتگو پاک شد.")
+
+
+# NEW: /image command
+async def image_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    prompt = " ".join(context.args).strip() if context.args else ""
+    if not prompt:
+        await update.message.reply_text("مثال: /image یه خرس کارتونی با عینک و کت")
+        return
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+
+    try:
+        url = await avalai_generate_image(prompt=prompt, size="1024x1024")
+        await update.message.reply_photo(photo=url)
+    except Exception as e:
+        await update.message.reply_text(f"خطا در ساخت تصویر: {type(e).__name__}: {str(e)[:200]}")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -213,6 +254,10 @@ def main() -> None:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reset", reset))
+
+    # NEW: /image
+    app.add_handler(CommandHandler("image", image_cmd))
+
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     app.run_polling(allowed_updates=Update.ALL_TYPES)
